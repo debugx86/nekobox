@@ -89,7 +89,12 @@ jobs:
           export PATH="$(realpath "$(cygpath -u '${{ github.workspace }}/../../src/installed/x64-windows/bin')"):$PATH"
           TOOLCHAIN=`realpath '${{ github.workspace }}/../../src/scripts/buildsystems/vcpkg.cmake'`
           TOOLCHAIN="$(cygpath -w "${TOOLCHAIN}")"
-          if [[ ${{ inputs.skip_updater }} == 'true' ]]; then export SKIP_UPDATE_BUTTON=ON; else export SKIP_UPDATE_BUTTON=OFF; fi
+          echo "Toolchain: ${TOOLCHAIN}"
+          # quoted on purpose: on a push-triggered run the inputs context is empty,
+          # and an unquoted substitution collapses to `[[ == 'true' ]]`, which is a
+          # bash syntax error that fails the step before cmake is ever reached
+          if [[ "${{ inputs.skip_updater }}" == "true" ]]; then export SKIP_UPDATE_BUTTON=ON; else export SKIP_UPDATE_BUTTON=OFF; fi
+          echo "SKIP_UPDATER=${SKIP_UPDATE_BUTTON}"
           cmake -GNinja -DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN}" '-DVCPKG_TARGET_TRIPLET=x64-windows' \
             -DVCPKG_MANIFEST_MODE=OFF -DSKIP_UPDATER="${SKIP_UPDATE_BUTTON}" -DCMAKE_BUILD_TYPE=Release \
             "-DNKR_DEFAULT_VERSION=${INPUT_VERSION}" -DBUILD_GO_PARTS=OFF -S . -B build
