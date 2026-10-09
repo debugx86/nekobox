@@ -1,0 +1,123 @@
+name: Build branch (windows x64, no publish)
+
+# Why this file exists: build.yml pins `ref: 'main'` in every checkout step, so
+# dispatching it on a fix branch silently builds main instead of that branch.
+# This workflow checks out the ref it is dispatched on and has no publish path
+# at all (permissions are read-only), so it can only ever compile and upload.
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_updater:
+        description: "Ship binaries without updater"
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  build-cpp-branch:
+    name: windows x64 from ${{ github.ref_name }}
+    permissions:
+      contents: read
+    runs-on: windows-2022
+    timeout-minutes: 120
+    env:
+      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
+      INPUT_VERSION: 5.11.28.2-ci
+    steps:
+      - name: Checking out sources
+        uses: actions/checkout@main
+        with:
+          submodules: "true"
+
+      - name: Setup Ninja
+        uses: qr243vbi/setup-ninja@master
+
+      - name: Install NSIS
+        uses: negrutiu/nsis-install@v2
+        with:
+          arch: x86_64
+
+      - name: Install MSVC compiler
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x86_64
+
+      - name: vcpkg build
+        id: vcpkg
+        uses: qr243vbi/vcpkg-action@master
+        with:
+          pkgs: thrift boost-filesystem boost-dll boost-headers boost-bimap cpr leveldb yaml-cpp quickjs-ng
+          triplet: x64-windows
+          vcpkg-subdir: ..\..\src
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download Srslist
+        shell: bash
+        run: |
+          curl -fLso "srslist.json" "https://github.com/qr243vbi/ruleset/raw/refs/heads/rule-set/srslist.json"
+          mkdir build
+
+      # Primary key is unique per run so a cache can never mask a rebuild; the
+      # restore-keys prefix still pulls the expensive dependency tree back down.
+      - name: Cache Builds
+        id: cache-common
+        uses: actions/cache@main
+        with:
+          path: build
+          key: branchbuild-${{ github.run_id }}-${{ github.sha }}
+          restore-keys: |
+            NinjaCache-windows-2022-x86_64-
+
+      - name: Install Zip, Curl, Jq, UPX
+        uses: ConorMacBride/install-package@v1
+        with:
+          choco: zip curl jq
+
+      - name: Install Customized Qt
+        uses: qr243vbi/qt6windows7@main
+        with:
+          version: 6.10.0_x86_64
+
+      - name: Windows - Configure
+        shell: bash
+        run: |
+          export PATH="$(realpath "$(cygpath -u '${{ github.workspace }}/../../src/installed/x64-windows/tools/Qt6/bin')"):$PATH"
+          export PATH="$(realpath "$(cygpath -u '${{ github.workspace }}/../../src/installed/x64-windows/bin')"):$PATH"
+          TOOLCHAIN=`realpath '${{ github.workspace }}/../../src/scripts/buildsystems/vcpkg.cmake'`
+          TOOLCHAIN="$(cygpath -w "${TOOLCHAIN}")"
+          if [[ ${{ inputs.skip_updater }} == 'true' ]]; then export SKIP_UPDATE_BUTTON=ON; else export SKIP_UPDATE_BUTTON=OFF; fi
+          cmake -GNinja -DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN}" '-DVCPKG_TARGET_TRIPLET=x64-windows' \
+            -DVCPKG_MANIFEST_MODE=OFF -DSKIP_UPDATER="${SKIP_UPDATE_BUTTON}" -DCMAKE_BUILD_TYPE=Release \
+            "-DNKR_DEFAULT_VERSION=${INPUT_VERSION}" -DBUILD_GO_PARTS=OFF -S . -B build
+
+      - name: Windows - Compile (the actual verification)
+        shell: bash
+        run: cmake --build build --config Release --verbose
+
+      # Packaging needs the core binary from build-go, which this workflow does
+      # not run; a failure here is not a compile failure, so keep it separate.
+      - name: Windows - Deploy / package
+        continue-on-error: true
+        shell: bash
+        run: |
+          export PATH="$(realpath "$(cygpath -u '${{ github.workspace }}/../../src/installed/x64-windows/tools/Qt6/bin')"):$PATH"
+          export PATH="$(realpath "$(cygpath -u '${{ github.workspace }}/../../src/installed/x64-windows/bin')"):$PATH"
+          source ./script/deploy_windows.sh x86_64
+
+      - name: Upload compiled executable
+        uses: actions/upload-artifact@main
+        with:
+          name: ${{ github.ref_name }}-windows-x64-exe
+          path: |
+            build/nekobox.exe
+            build/nekobox_core.exe
+          if-no-files-found: warn
+
+      - name: Upload deployment folder
+        if: always()
+        uses: actions/upload-artifact@main
+        with:
+          name: ${{ github.ref_name }}-windows-x64-deployment
+          path: deployment
+          if-no-files-found: ignore
