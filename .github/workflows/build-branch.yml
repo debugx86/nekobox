@@ -6,6 +6,9 @@ name: Build branch (windows x64, no publish)
 # at all (permissions are read-only), so it can only ever compile and upload.
 
 on:
+  push:
+    branches:
+      - 'ci/**'
   workflow_dispatch:
     inputs:
       skip_updater:
