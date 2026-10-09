@@ -113,19 +113,25 @@ jobs:
           export PATH="$(realpath "$(cygpath -u '${{ github.workspace }}/../../src/installed/x64-windows/bin')"):$PATH"
           source ./script/deploy_windows.sh x86_64
 
+      - name: Tar deployment folder
+        shell: bash
+        run: tar czvf branchbuild-artifacts.tgz ./deployment
+
+      # github.ref_name is "ci/branch-build"; an artifact name may not contain
+      # '/', so run 37925281928 failed both uploads after a green build.
       - name: Upload compiled executable
         uses: actions/upload-artifact@main
         with:
-          name: ${{ github.ref_name }}-windows-x64-exe
+          name: branchbuild-${{ github.sha }}-windows-x64-exe
           path: |
-            build/nekobox.exe
-            build/nekobox_core.exe
+            deployment/windows64/*.exe
+            deployment/windows64/*.dll
           if-no-files-found: warn
 
       - name: Upload deployment folder
         if: always()
         uses: actions/upload-artifact@main
         with:
-          name: ${{ github.ref_name }}-windows-x64-deployment
-          path: deployment
-          if-no-files-found: ignore
+          name: branchbuild-${{ github.sha }}-windows-x64-full
+          path: branchbuild-artifacts.tgz
+          if-no-files-found: warn
