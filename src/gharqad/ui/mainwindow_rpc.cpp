@@ -793,7 +793,13 @@ void MainWindow::profile_start(int _id, bool do_not_test) {
         // cancel timeout
         runOnUiThread([=,this] {
             restartMsgboxTimer->cancel();
-            restartMsgboxTimer->deleteLater();
+            // Deliberately NOT deleteLater()'d. A queued timeoutFunc can still be
+            // sitting in the event queue, and disconnect() does not remove a posted
+            // QMetaCallEvent - deleting the timer here left sendTimerEvent() with a
+            // dangling receiver (AV read of a garbage QObject, see the crashes at
+            // nekobox+0x2490b3 / QEventDispatcherWin32Private::sendTimerEvent).
+            // It is a child of `this`, so it is freed with the window; cancel() has
+            // already stopped it and detached it from the box.
             restartMsgbox->deleteLater();
         });
     });
@@ -894,13 +900,21 @@ void MainWindow::profile_stop(bool crash, bool block, bool manual) {
     Stats::trafficLooper->UpdateAll();
     for (const auto &item: Stats::trafficLooper->items) {
         if (item->id < 0) continue;
-        Configs::profileManager->GetProfile(item->id)->Save();
+        // A traffic entry can outlive its profile (deleted, or not migrated yet),
+        // and GetProfile() returns null then. This is the deref upstream fixed in
+        // 5.11.28.3 ("avoid crash when traffic profile is missing"); keeping it
+        // here so we are not relying on that release.
+        auto profile = Configs::profileManager->GetProfile(item->id);
+        if (profile == nullptr) continue;
+        profile->Save();
         refresh_proxy_list(item->id);
     }
     Stats::trafficLooper->loop_mutex.unlock();
 
     restartMsgboxTimer->cancel();
-    restartMsgboxTimer->deleteLater();
+    // Same reason as in profile_start(): keep the timer alive so a timeout that is
+    // already queued cannot be delivered to a freed QObject. Child of `this`, freed
+    // with the window; cancel() stopped it and detached it from the box.
     restartMsgbox->deleteLater();
 
     runOnNewThread([=, this, &blocker] {
