@@ -1,0 +1,8 @@
+- fix: never deref a store handle that failed to open, and keep the file copy as a fallback
+- fix: stop losing settings when the leveldb store will not open (keep a .cfg.bak, retry a locked store, repair a broken one)
+- fix: stop handing a queued timer timeout to a freed QObject (crash when restarting with a profile running)
+- fix: stop dropping the .cfg copy when Load could not write it into the store
+- fix: drop a URL test result when its profile is no longer the running one
+- fix: stop dereferencing running in the deferred URL test handler
+- fix: stop reading and writing MainWindow::running off the UI thread
+- fix: restore 5.11.26 clash parsing, fix at() infinite loop
